@@ -7,15 +7,40 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"time"
 
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/gorilla/mux"
 	"github.com/joho/godotenv"
 	"github.com/justinas/alice"
 	_ "github.com/lib/pq"
+	"golang.org/x/crypto/bcrypt"
 )
 
 type App struct {
-	DB *sql.DB
+	DB     *sql.DB
+	JWTKey []byte
+}
+
+type Credentials struct {
+	Username string `json:"username,omitempty"`
+	Password string `json:"password,omitempty"`
+}
+
+type Claims struct {
+	Username string `json:"username"`
+	ID       string `json:"id"`
+	jwt.RegisteredClaims
+}
+
+type UserResponse struct {
+	ID       string `json:"id"`
+	Username string `json:"username"`
+	Token    string `json:"token"`
+}
+
+type ErrorResponse struct {
+	Message string `json:"message"`
 }
 
 type RouteResponse struct {
@@ -50,7 +75,12 @@ func main() {
 
 	defer DB.Close()
 
-	// app := &App{DB: DB}
+	JWTKey := os.Getenv("JWT_SECRET")
+	if len(JWTKey) == 0 {
+		log.Fatalf("JWTKey environment variable is not set")
+	}
+
+	app := &App{DB: DB, JWTKey: []byte(JWTKey)}
 
 	log.Println("Starting server")
 	router := mux.NewRouter()
@@ -61,9 +91,9 @@ func main() {
 	log.Println("Setting up routes")
 	router.Handle("/", alice.New(loggingMiddleware).ThenFunc(handleRoot)).Methods("GET")
 
-	router.Handle("/register", alice.New(loggingMiddleware).ThenFunc(handleRegister)).Methods("POST")
+	router.Handle("/register", alice.New(loggingMiddleware).ThenFunc(app.handleRegister)).Methods("POST")
 
-	router.Handle("/login", alice.New(loggingMiddleware).ThenFunc(handleLogin)).Methods("POST")
+	router.Handle("/login", alice.New(loggingMiddleware).ThenFunc(app.handleLogin)).Methods("POST")
 
 	router.Handle("/projects", alice.New(loggingMiddleware).ThenFunc(handleGetProjects)).Methods("GET")
 
@@ -85,16 +115,79 @@ func handleRoot(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(RouteResponse{Message: "Hello from server"})
 }
 
-// Register User
-func handleRegister(w http.ResponseWriter, r *http.Request) {
+// Register function to handle user registration
+func (app *App) handleRegister(w http.ResponseWriter, r *http.Request) {
+	var creds Credentials
+
+	err := json.NewDecoder(r.Body).Decode(&creds)
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, "Invalid request payload")
+		return
+	}
+
+	hashedPwd, err := bcrypt.GenerateFromPassword([]byte(creds.Password), bcrypt.DefaultCost)
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, "Error hashing password")
+		return
+	}
+
+	var id string
+	err = app.DB.QueryRow("INSERT INTO \"users\" (username, password) VALUES ($1, $2) RETURNING id", creds.Username, string(hashedPwd)).Scan(&id)
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, "Error creating user")
+		return
+	}
+
+	tokenString, err := app.generateToken(creds.Username, id)
+
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Error generating token")
+		return
+	}
+
 	w.Header().Set("Content-type", "application/json")
-	json.NewEncoder(w).Encode(RouteResponse{Message: "Hello from register"})
+	json.NewEncoder(w).Encode(UserResponse{ID: id, Username: creds.Username, Token: tokenString})
 }
 
-// Login User
-func handleLogin(w http.ResponseWriter, r *http.Request) {
+// Login function to handle user login
+func (app *App) handleLogin(w http.ResponseWriter, r *http.Request) {
+	var creds Credentials
+
+	err := json.NewDecoder(r.Body).Decode(&creds)
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, "Invalid request payload")
+		return
+	}
+
+	var storedCreds Credentials
+	var id string
+	err = app.DB.QueryRow("SELECT id, username, password FROM \"users\" WHERE username=$1", creds.Username).Scan(&id, &storedCreds.Username, &storedCreds.Password)
+
+	if err != nil {
+		if err == sql.ErrNoRows {
+			respondWithError(w, http.StatusUnauthorized, "Invalid username or password")
+			return
+		}
+		respondWithError(w, http.StatusInternalServerError, "Invalid request payload")
+		return
+	}
+
+	err = bcrypt.CompareHashAndPassword([]byte(storedCreds.Password), []byte(creds.Password))
+
+	if err != nil {
+		respondWithError(w, http.StatusUnauthorized, "Invalid username or password")
+		return
+	}
+
+	tokenString, err := app.generateToken(creds.Username, id)
+
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Error generating token")
+		return
+	}
+
 	w.Header().Set("Content-type", "application/json")
-	json.NewEncoder(w).Encode(RouteResponse{Message: "Hello from login"})
+	json.NewEncoder(w).Encode(UserResponse{ID: id, Username: creds.Username, Token: tokenString})
 }
 
 // Create Project
@@ -147,7 +240,7 @@ func createProjectsTable(DB *sql.DB) {
 		dependencies TEXT[],
 		dev_dependencies TEXT[],
 		status TEXT NOT NULL CHECK (status IN ('backlog', 'developing', 'done')),
-		"user" TEXT REFERENCES users(username) ON DELETE NO ACTION
+		"user" INTEGER REFERENCES users(id) ON DELETE NO ACTION
 	)`
 
 	_, err := DB.Exec(query)
@@ -156,18 +249,45 @@ func createProjectsTable(DB *sql.DB) {
 	}
 }
 
-
 func createUsersTable(DB *sql.DB) {
 	query := `CREATE TABLE IF NOT EXISTS users (
+		id SERIAL PRIMARY KEY,
 		username TEXT NOT NULL UNIQUE, 
 		password TEXT NOT NULL
 	)`
 
 	_, err := DB.Exec(query)
-	
+
 	if err != nil {
 		log.Fatal(err)
 	}
+}
+
+func respondWithError(w http.ResponseWriter, code int, message string) {
+	w.WriteHeader(code)
+	json.NewEncoder(w).Encode(ErrorResponse{Message: message})
+}
+
+func (app *App) generateToken(username, id string) (string, error) {
+	expirationTime := time.Now().Add(1 * time.Hour)
+
+	claims := &Claims{
+		Username: username,
+		ID:       id,
+		RegisteredClaims: jwt.RegisteredClaims{
+			ExpiresAt: jwt.NewNumericDate(expirationTime),
+		},
+	}
+
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+
+	tokenString, err := token.SignedString(app.JWTKey)
+
+	if err != nil {
+		return "", err
+	}
+
+	return tokenString, nil
 }
 
 // Middlewares
