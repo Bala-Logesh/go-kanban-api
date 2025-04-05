@@ -1,10 +1,12 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -16,6 +18,7 @@ import (
 	"github.com/joho/godotenv"
 	"github.com/justinas/alice"
 	_ "github.com/lib/pq"
+	"github.com/xeipuuv/gojsonschema"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -85,6 +88,13 @@ func main() {
 		log.Fatalf("JWTKey environment variable is not set")
 	}
 
+	var loadErr error
+	userSchema, loadErr := loadSchema("schemas/user.json")
+
+	if loadErr != nil {
+		log.Fatalf("Error loading user schema: %v\n", loadErr)
+	}
+
 	app := &App{DB: DB, JWTKey: []byte(JWTKey), claimsKey: "claims"}
 
 	log.Println("Starting server")
@@ -94,11 +104,15 @@ func main() {
 	url := fmt.Sprintf("127.0.0.1:%d", port)
 
 	log.Println("Setting up routes")
+
+	// Middleware chain and routes for user auth
+	userChain := alice.New(loggingMiddleware, validateMiddleware(userSchema))
+
 	router.Handle("/", alice.New(loggingMiddleware).ThenFunc(handleRoot)).Methods("GET")
 
-	router.Handle("/register", alice.New(loggingMiddleware).ThenFunc(app.handleRegister)).Methods("POST")
+	router.Handle("/register", userChain.ThenFunc(app.handleRegister)).Methods("POST")
 
-	router.Handle("/login", alice.New(loggingMiddleware).ThenFunc(app.handleLogin)).Methods("POST")
+	router.Handle("/login", userChain.ThenFunc(app.handleLogin)).Methods("POST")
 
 	router.Handle("/projects", alice.New(loggingMiddleware).ThenFunc(handleGetProjects)).Methods("GET")
 
@@ -295,6 +309,17 @@ func (app *App) generateToken(username, id string) (string, error) {
 	return tokenString, nil
 }
 
+// Loads JSON schema from a file
+func loadSchema(filePath string) (string, error) {
+	data, err := os.ReadFile(filePath)
+
+	if err != nil {
+		return "", err
+	}
+
+	return string(data), nil
+}
+
 // Middlewares
 func loggingMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -339,4 +364,50 @@ func (app *App) jwtMiddleware(next http.Handler) http.Handler {
 
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+func validateMiddleware(schema string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var body map[string]interface{}
+
+			bodyBytes, err := io.ReadAll(r.Body)
+
+			if err != nil {
+				respondWithError(w, http.StatusBadRequest, "Invalid request payload")
+				return
+			}
+
+			err = json.Unmarshal(bodyBytes, &body)
+
+			if err != nil {
+				respondWithError(w, http.StatusBadRequest, "Invalid request payload")
+				return
+			}
+
+			schemaLoader := gojsonschema.NewStringLoader(schema)
+			documentLoader := gojsonschema.NewGoLoader(body)
+
+			result, err := gojsonschema.Validate(schemaLoader, documentLoader)
+
+			if err != nil {
+				respondWithError(w, http.StatusInternalServerError, "Error validating JSON")
+				return
+			}
+
+			if !result.Valid() {
+				var errs []string
+
+				for _, err := range result.Errors() {
+					errs = append(errs, err.String())
+				}
+
+				respondWithError(w, http.StatusInternalServerError, strings.Join(errs, ", "))
+				return
+			}
+
+			r.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
+			next.ServeHTTP(w, r)
+		})
+	}
 }
