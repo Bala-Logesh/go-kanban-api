@@ -1,12 +1,14 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -18,14 +20,17 @@ import (
 )
 
 type App struct {
-	DB     *sql.DB
-	JWTKey []byte
+	DB        *sql.DB
+	JWTKey    []byte
+	claimsKey contextKey
 }
 
 type Credentials struct {
 	Username string `json:"username,omitempty"`
 	Password string `json:"password,omitempty"`
 }
+
+type contextKey string
 
 type Claims struct {
 	Username string `json:"username"`
@@ -80,7 +85,7 @@ func main() {
 		log.Fatalf("JWTKey environment variable is not set")
 	}
 
-	app := &App{DB: DB, JWTKey: []byte(JWTKey)}
+	app := &App{DB: DB, JWTKey: []byte(JWTKey), claimsKey: "claims"}
 
 	log.Println("Starting server")
 	router := mux.NewRouter()
@@ -296,5 +301,42 @@ func loggingMiddleware(next http.Handler) http.Handler {
 		log.Printf("%s %s %s\n", r.RemoteAddr, r.Method, r.URL)
 
 		next.ServeHTTP(w, r)
+	})
+}
+
+func (app *App) jwtMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		authHeader := r.Header.Get("Authorization")
+
+		if authHeader == "" {
+			respondWithError(w, http.StatusUnauthorized, "No token provided")
+			return
+		}
+
+		tokenString := strings.TrimPrefix(authHeader, "Bearer ")
+		claims := &Claims{}
+
+		token, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (interface{}, error) {
+			return app.JWTKey, nil
+		})
+
+		if err != nil {
+			if err == jwt.ErrSignatureInvalid {
+				respondWithError(w, http.StatusUnauthorized, "Invalid token signature")
+				return
+			}
+
+			respondWithError(w, http.StatusBadRequest, "Invalid token")
+			return
+		}
+
+		if !token.Valid {
+			respondWithError(w, http.StatusUnauthorized, "Invalid token")
+			return
+		}
+
+		ctx := context.WithValue(r.Context(), app.claimsKey, claims)
+
+		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
