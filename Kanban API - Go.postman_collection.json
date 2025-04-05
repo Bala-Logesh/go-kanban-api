@@ -1,0 +1,230 @@
+{
+	"info": {
+		"_postman_id": "26b294ca-c483-4113-93f2-a6d8efd9cee3",
+		"name": "Kanban API - Go",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+		"_exporter_id": "12531528"
+	},
+	"item": [
+		{
+			"name": "Index Route",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "{{url}}/",
+					"host": [
+						"{{url}}"
+					],
+					"path": [
+						""
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Register User",
+			"request": {
+				"auth": {
+					"type": "noauth"
+				},
+				"method": "POST",
+				"header": [],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"username\": \"testing\",\n    \"password\": \"test1234\"\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "{{url}}/register",
+					"host": [
+						"{{url}}"
+					],
+					"path": [
+						"register"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Delete Project",
+			"request": {
+				"method": "DELETE",
+				"header": [],
+				"url": {
+					"raw": "{{url}}/projects/2",
+					"host": [
+						"{{url}}"
+					],
+					"path": [
+						"projects",
+						"2"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Create Project",
+			"request": {
+				"method": "POST",
+				"header": [],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n  \"name\": \"My second project\",\n  \"repo_url\": \"https://github.com/m6io/my-project\",\n  \"site_url\": \"https://github.com/m6io/my-project-site\",\n  \"dependencies\": [\"react\", \"react-dom\"],\n  \"dev_dependencies\": [\"@types/react-dom\", \"@types/react\"],\n  \"status\": \"developing\"\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "{{url}}/projects",
+					"host": [
+						"{{url}}"
+					],
+					"path": [
+						"projects"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Get Projects",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "{{url}}/projects",
+					"host": [
+						"{{url}}"
+					],
+					"path": [
+						"projects"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Update Project",
+			"request": {
+				"method": "PUT",
+				"header": [],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n        \"name\": \"My second project edited\",\n        \"repo_url\": \"https://github.com/m6io/my-project\",\n        \"site_url\": \"https://github.com/m6io/my-project-site\",\n        \"dependencies\": [\n            \"react\",\n            \"react-dom\"\n        ],\n        \"dev_dependencies\": [\n            \"@types/react-dom\",\n            \"@types/react\"\n        ],\n        \"status\": \"developing\"\n    }",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "{{url}}/projects/2",
+					"host": [
+						"{{url}}"
+					],
+					"path": [
+						"projects",
+						"2"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Login User",
+			"request": {
+				"auth": {
+					"type": "noauth"
+				},
+				"method": "POST",
+				"header": [],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"username\": \"testing\",\n    \"password\": \"test1234\"\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "{{url}}/login",
+					"host": [
+						"{{url}}"
+					],
+					"path": [
+						"login"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Get Project",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "{{url}}/projects/2",
+					"host": [
+						"{{url}}"
+					],
+					"path": [
+						"projects",
+						"2"
+					]
+				}
+			},
+			"response": []
+		}
+	],
+	"auth": {
+		"type": "bearer",
+		"bearer": [
+			{
+				"key": "token",
+				"value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VybmFtZSI6InRlc3RpbmciLCJpZCI6IjMiLCJleHAiOjE3NDM4ODcyNjF9.OtZaUh7oVPA7s-L9WVuYx5w3hVaVVdOhXnCSIIUWpWA",
+				"type": "string"
+			}
+		]
+	},
+	"event": [
+		{
+			"listen": "prerequest",
+			"script": {
+				"type": "text/javascript",
+				"packages": {},
+				"exec": [
+					""
+				]
+			}
+		},
+		{
+			"listen": "test",
+			"script": {
+				"type": "text/javascript",
+				"packages": {},
+				"exec": [
+					""
+				]
+			}
+		}
+	],
+	"variable": [
+		{
+			"key": "url",
+			"value": "127.0.0.1:3000",
+			"type": "string"
+		}
+	]
+}
