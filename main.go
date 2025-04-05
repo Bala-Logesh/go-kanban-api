@@ -1,14 +1,22 @@
 package main
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 
 	"github.com/gorilla/mux"
+	"github.com/joho/godotenv"
 	"github.com/justinas/alice"
+	_ "github.com/lib/pq"
 )
+
+type App struct {
+	DB *sql.DB
+}
 
 type RouteResponse struct {
 	Message string `json:"message"`
@@ -16,6 +24,34 @@ type RouteResponse struct {
 }
 
 func main() {
+	err := godotenv.Load()
+	if err != nil {
+		log.Fatalf("Error loading .env file")
+	}
+
+	log.Println("Connecting to database")
+	connStr := os.Getenv("PSQL_URL")
+	if len(connStr) == 0 {
+		log.Fatalf("PSQL_URL environment variable is not set")
+	}
+
+	DB, err := sql.Open("postgres", connStr)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	if err = DB.Ping(); err != nil {
+		log.Fatal(err)
+	}
+
+	log.Println("Creating tables")
+	createUsersTable(DB)
+	createProjectsTable(DB)
+
+	defer DB.Close()
+
+	// app := &App{DB: DB}
+
 	log.Println("Starting server")
 	router := mux.NewRouter()
 
@@ -99,6 +135,39 @@ func getIDFromRoute(r *http.Request) string {
 	idStr := mux.Vars(r)["id"]
 
 	return idStr
+}
+
+func createProjectsTable(DB *sql.DB) {
+	query := `CREATE TABLE IF NOT EXISTS projects (
+		id SERIAL PRIMARY KEY,
+		name TEXT NOT NULL,
+		repo_url TEXT,
+		site_url TEXT,
+		description TEXT,
+		dependencies TEXT[],
+		dev_dependencies TEXT[],
+		status TEXT NOT NULL CHECK (status IN ('backlog', 'developing', 'done')),
+		"user" TEXT REFERENCES users(username) ON DELETE NO ACTION
+	)`
+
+	_, err := DB.Exec(query)
+	if err != nil {
+		log.Fatal(err)
+	}
+}
+
+
+func createUsersTable(DB *sql.DB) {
+	query := `CREATE TABLE IF NOT EXISTS users (
+		username TEXT NOT NULL UNIQUE, 
+		password TEXT NOT NULL
+	)`
+
+	_, err := DB.Exec(query)
+	
+	if err != nil {
+		log.Fatal(err)
+	}
 }
 
 // Middlewares
